@@ -1,89 +1,108 @@
-
 Cycle 1:
-IF : mov R1  1 
-ID : -   
-EX : -   
-MEM: -   
-WB : -   
-Registers: r1=0 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : mov r1 2
+
+ID : -
+EX : -
+MEM: -
+WB : -
+Registers after cycle 1:
+r1 = 0 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 2:
-IF : mov R2  3 
-ID : mov R1  1 
-EX : -   
-MEM: -   
-WB : -   
-Registers: r1=0 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : mov r2 4
+
+ID : mov r1 2
+
+EX : -
+MEM: -
+WB : -
+Registers after cycle 2:
+r1 = 0 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 3:
-IF : add R3  R1 R2
-ID : mov R2  3 
-EX : mov R1  1 
-MEM: -   
-WB : -   
-Registers: r1=0 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : add r3 r2 r1
+ID : mov r2 4
+
+EX : mov r1 2
+
+MEM: -
+WB : -
+Registers after cycle 3:
+r1 = 0 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 4:
-IF : sub R4  R1 R2
-ID : add R3  R1 R2
-EX : mov R2  3 
-MEM: mov R1  1 
-WB : -   
-Registers: r1=0 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : mul r4 r2 r1
+ID : add r3 r2 r1
+EX : mov r2 4
+
+MEM: mov r1 2
+
+WB : -
+Registers after cycle 4:
+r1 = 0 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 5:
-IF : mul R5  R1 R2
-ID : sub R4  R1 R2
-EX : add R3  R1 R2
-MEM: mov R2  3 
-WB : mov R1  1 
-Registers: r1=0 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : mov r5 r4
+ID : mul r4 r2 r1
+EX : add r3 r2 r1
+MEM: mov r2 4
+
+WB : mov r1 2
+
+Registers after cycle 5:
+r1 = 0 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 6:
-IF : -   
-ID : mul R5  R1 R2
-EX : sub R4  R1 R2
-MEM: add R3  R1 R2
-WB : mov R2  3 
-Registers: r1=1 r2=0 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : - r5 r4
+ID : mov r5 r4
+EX : mul r4 r2 r1
+MEM: add r3 r2 r1
+WB : mov r2 4
+
+Registers after cycle 6:
+r1 = 2 r2 = 0 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 7:
-IF : -   
-ID : -   
-EX : mul R5  R1 R2
-MEM: sub R4  R1 R2
-WB : add R3  R1 R2
-Registers: r1=1 r2=3 r3=0 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : - r5 r4
+ID : - r5 r4
+EX : mov r5 r4
+MEM: mul r4 r2 r1
+WB : add r3 r2 r1
+Registers after cycle 7:
+r1 = 2 r2 = 4 r3 = 0 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0 
 
 Cycle 8:
-IF : -   
-ID : -   
-EX : -   
-MEM: mul R5  R1 R2
-WB : sub R4  R1 R2
-Registers: r1=1 r2=3 r3=3 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : - r5 r4
+ID : - r5 r4
+EX : - r5 r4
+MEM: mov r5 r4
+WB : mul r4 r2 r1
+Registers after cycle 8:
+r1 = 2 r2 = 4 r3 = 6 r4 = 0 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 9:
-IF : -   
-ID : -   
-EX : -   
-MEM: -   
-WB : mul R5  R1 R2
-Registers: r1=1 r2=3 r3=3 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : - r5 r4
+ID : - r5 r4
+EX : - r5 r4
+MEM: - r5 r4
+WB : mov r5 r4
+Registers after cycle 9:
+r1 = 2 r2 = 4 r3 = 6 r4 = 8 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
 Cycle 10:
-IF : -   
-ID : -   
-EX : -   
-MEM: -   
-WB : -   
-Registers: r1=1 r2=3 r3=3 r4=0 r5=0 r6=0 r7=0 r8=0 
+IF : - r5 r4
+ID : - r5 r4
+EX : - r5 r4
+MEM: - r5 r4
+WB : - r5 r4
+Registers after cycle 10:
+r1 = 2 r2 = 4 r3 = 6 r4 = 8 r5 = 0 r6 = 0 r7 = 0 r8 = 0
 
-Final Registers:
-r1 = 1
-r2 = 3
-r3 = 3
-r4 = 0
+Registers:
+r1 = 2
+r2 = 4
+r3 = 6
+r4 = 8
 r5 = 0
 r6 = 0
 r7 = 0
