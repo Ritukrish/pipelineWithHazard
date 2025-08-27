@@ -234,8 +234,15 @@ ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
 }
 
 // ---------- MEM (no real memory ops in this ISA) ----------
-void mem_stage(CPU* cpu) {
-    (void)cpu; // placeholder
+typedef struct {
+    StageLatch next;
+} MemResult;
+
+
+MemResult mem_stage(StageLatch ex_mem) {
+    MemResult r;
+    r.next = ex_mem;   // No memory ops in this ISA
+    return r;
 }
 
 // ---------- WB ----------
@@ -248,28 +255,28 @@ void wb_stage(CPU* cpu) {
 }
 
 // ---------- Pipeline advancement ----------
-void advance_pipeline(CPU* cpu, bool needs_stall) {
+void advance_pipeline(CPU* cpu,
+                      ExecResult ex_res,
+                      MemResult mem_res,
+                      DecodeResult dec_res) {
     // MEM → WB
-    cpu->MEM_WB = cpu->EX_MEM;
+    cpu->MEM_WB = mem_res.next;
 
     // EX → MEM
-    cpu->EX_MEM = cpu->ID_EX;
+    cpu->EX_MEM = ex_res.next;
 
     // ID → EX
-    if (needs_stall) {
-        cpu->ID_EX = make_nop_latch();
-    } else {
-        cpu->ID_EX = cpu->IF_ID;
-    }
+    cpu->ID_EX = dec_res.stall ? make_nop_latch() : dec_res.next;
 
     // IF → ID
-    if (!needs_stall) {
+    if (!dec_res.stall) {
         Instruction fetched_inst;
         fetch_stage(cpu, &fetched_inst);
         cpu->IF_ID.inst = fetched_inst;
         if (cpu->PC < cpu->inst_count) cpu->PC++;
     }
 }
+
 
 // ---------- Pretty printing ----------
 static const char* src_name(FwdSrc s) {
@@ -361,28 +368,23 @@ int main() {
     cpu.IF_ID.inst = first;
     if (cpu.PC < cpu.inst_count) cpu.PC++;
 
-    while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
-        // ---- Part 1: execute current cycle (conceptually in parallel; order: WB→MEM→EX→ID) ----
-        wb_stage(&cpu);
-        mem_stage(&cpu);
+while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
+    // ---- Part 1: compute stage outputs (no latch updates yet) ----
+    wb_stage(&cpu);  // still mutates regfile directly
 
-        ExecResult ex_res = execute_stage(&cpu, cpu.ID_EX);
-        // With this ISA (no loads), stalls are unnecessary:
-        DecodeResult dec_res = decode_stage(&cpu, cpu.IF_ID, cpu.ID_EX);
+    ExecResult ex_res   = execute_stage(&cpu, cpu.ID_EX);
+    MemResult  mem_res  = mem_stage(cpu.EX_MEM);
+    DecodeResult dec_res = decode_stage(&cpu, cpu.IF_ID, cpu.ID_EX);
 
-        // Overwrite current stage latches with computed results for printing clarity
-        // (they represent "end of stage" values for this cycle)
-        cpu.ID_EX = ex_res.next;
-        // Note: IF_ID is still the same until advancement
+    // ---- Part 2: print/debug current cycle ----
+    print_cycle_state(&cpu, cycle, dec_res.stall, dec_res.stall_reason);
 
-        // ---- Part 2: print state ----
-        print_cycle_state(&cpu, cycle, dec_res.stall, dec_res.stall_reason);
+    // ---- Part 3: advance latches simultaneously ----
+    advance_pipeline(&cpu, ex_res, mem_res, dec_res);
 
-        // ---- Part 3: advance pipeline ----
-        advance_pipeline(&cpu, dec_res.stall);
+    cycle++;
+}
 
-        cycle++;
-    }
 
     // Final summary
     printf("\n=============== FINAL REGISTER STATE ===============\n");
@@ -394,3 +396,4 @@ int main() {
 
     return 0;
 }
+
