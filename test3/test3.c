@@ -199,22 +199,28 @@ DecodeResult decode_stage(const CPU* cpu, StageLatch if_id, StageLatch id_ex) {
 
 // ---------- EX (pure) ----------
 typedef struct {
-    StageLatch next;
+    StageLatch next;     // the latch for EX/MEM
+    bool branch_taken;   // true if branch was taken
+    int target_pc;       // new PC if branch
+    bool valid;          // whether this result is valid
 } ExecResult;
+
 
 ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
     ExecResult r;
     r.next = id_ex;
+    r.branch_taken = false;
+    r.target_pc = -1;
+    r.valid = id_ex.inst.valid;
 
     if (!id_ex.inst.valid || id_ex.inst.op == OP_NOOP) {
-        // Keep defaults
         r.next.val_rs1 = r.next.val_rs2 = 0;
         r.next.src_rs1 = r.next.src_rs2 = SRC_NONE;
         r.next.alu_result = 0;
         return r;
     }
 
-    // Resolve with forwarding
+    // Forwarding
     Resolved rs1 = resolve_operand(cpu, id_ex.inst.rs1);
     Resolved rs2 = resolve_operand(cpu, id_ex.inst.rs2);
 
@@ -228,22 +234,27 @@ ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
         case OP_ADD: r.next.alu_result = rs1.value + rs2.value; break;
         case OP_SUB: r.next.alu_result = rs1.value - rs2.value; break;
         case OP_MUL: r.next.alu_result = rs1.value * rs2.value; break;
-        default:     r.next.alu_result = 0; break;
+        default:
+            r.next.alu_result = 0;
+            break;
     }
+
     return r;
 }
 
+
 // ---------- MEM (no real memory ops in this ISA) ----------
+// ---------- MEM (pure) ----------
 typedef struct {
     StageLatch next;
 } MemResult;
 
-
-MemResult mem_stage(StageLatch ex_mem) {
+MemResult memory_stage(StageLatch ex_mem) {
     MemResult r;
-    r.next = ex_mem;   // No memory ops in this ISA
+    r.next = ex_mem;  // pass-through (no real memory ops in this ISA)
     return r;
 }
+
 
 // ---------- WB ----------
 void wb_stage(CPU* cpu) {
@@ -258,7 +269,10 @@ void wb_stage(CPU* cpu) {
 void advance_pipeline(CPU* cpu,
                       ExecResult ex_res,
                       MemResult mem_res,
+                      Instruction fetched_inst,
                       DecodeResult dec_res) {
+    // Commit WB (already done inside wb_stage)
+
     // MEM → WB
     cpu->MEM_WB = mem_res.next;
 
@@ -266,12 +280,13 @@ void advance_pipeline(CPU* cpu,
     cpu->EX_MEM = ex_res.next;
 
     // ID → EX
-    cpu->ID_EX = dec_res.stall ? make_nop_latch() : dec_res.next;
+    if (dec_res.stall)
+        cpu->ID_EX = make_nop_latch();
+    else
+        cpu->ID_EX = cpu->IF_ID;
 
     // IF → ID
     if (!dec_res.stall) {
-        Instruction fetched_inst;
-        fetch_stage(cpu, &fetched_inst);
         cpu->IF_ID.inst = fetched_inst;
         if (cpu->PC < cpu->inst_count) cpu->PC++;
     }
@@ -368,19 +383,30 @@ int main() {
     cpu.IF_ID.inst = first;
     if (cpu.PC < cpu.inst_count) cpu.PC++;
 
-while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
-    // ---- Part 1: compute stage outputs (no latch updates yet) ----
-    wb_stage(&cpu);  // still mutates regfile directly
+ while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
+    // ---- Phase 1: compute ----
+    wb_stage(&cpu);
+   MemResult mem_res = memory_stage(cpu.EX_MEM);
+ExecResult ex_res = execute_stage(&cpu, cpu.ID_EX);
 
-    ExecResult ex_res   = execute_stage(&cpu, cpu.ID_EX);
-    MemResult  mem_res  = mem_stage(cpu.EX_MEM);
     DecodeResult dec_res = decode_stage(&cpu, cpu.IF_ID, cpu.ID_EX);
+    Instruction fetched_inst;
+    fetch_stage(&cpu, &fetched_inst);
 
-    // ---- Part 2: print/debug current cycle ----
-    print_cycle_state(&cpu, cycle, dec_res.stall, dec_res.stall_reason);
+    // ---- Phase 2: print ----
+    // ---- Phase 2: print ----
+// Use the execute result just for printing the EX line
+StageLatch saved_id_ex = cpu.ID_EX;
+cpu.ID_EX = ex_res.next;
 
-    // ---- Part 3: advance latches simultaneously ----
-    advance_pipeline(&cpu, ex_res, mem_res, dec_res);
+print_cycle_state(&cpu, cycle, dec_res.stall, dec_res.stall_reason);
+
+// Restore the original latched view before we advance
+cpu.ID_EX = saved_id_ex;
+
+
+    // ---- Phase 3: latch update ----
+    advance_pipeline(&cpu, ex_res, mem_res, fetched_inst, dec_res);
 
     cycle++;
 }
@@ -396,4 +422,3 @@ while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
 
     return 0;
 }
-
