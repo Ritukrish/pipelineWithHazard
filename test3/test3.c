@@ -160,12 +160,15 @@ bool pipeline_is_empty(const CPU* cpu) {
 
 // ---------- IF ----------
 void fetch_stage(CPU* cpu, Instruction* fetched_inst) {
+    assert(cpu->PC >= 0 && cpu->PC <= cpu->inst_count);  // ✅ PC must be in range
+
     if (cpu->PC < cpu->inst_count) {
         *fetched_inst = cpu->program[cpu->PC];
     } else {
         *fetched_inst = make_nop();
     }
 }
+
 
 // ---------- Forwarding helper ----------
 typedef struct {
@@ -243,14 +246,22 @@ ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
         return r;
     }
 
+    //  Defensive: register index validity
+    assert(reg_valid(id_ex.inst.rd));
+    assert(reg_valid(id_ex.inst.rs1));
+    assert(reg_valid(id_ex.inst.rs2));
+
     // Forwarding
     Resolved rs1 = resolve_operand(cpu, id_ex.inst.rs1);
     Resolved rs2 = resolve_operand(cpu, id_ex.inst.rs2);
+
 
     r.next.val_rs1 = rs1.value;
     r.next.val_rs2 = rs2.value;
     r.next.src_rs1 = rs1.src;
     r.next.src_rs2 = rs2.src;
+
+    assert(id_ex.inst.op >= OP_NOOP && id_ex.inst.op <= OP_MUL);
 
     switch (id_ex.inst.op) {
         case OP_MOV: r.next.alu_result = id_ex.inst.imm; break;
@@ -445,4 +456,5 @@ cpu.ID_EX = saved_id_ex;
 
     return 0;
 }
+
 
