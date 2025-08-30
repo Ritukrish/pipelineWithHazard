@@ -43,7 +43,7 @@ typedef struct {
     int PC;                        // Program Counter
 
     // Pipeline latches
-    StageLatch IF_ID, ID_EX, EX_MEM, MEM_WB;
+    StageLatch pipeline_IF_ID, pipeline_ID_EX, pipeline_EX_MEM, pipeline_MEM_WB;
 } CPU;
 
 // ---------- Helpers ----------
@@ -84,10 +84,10 @@ StageLatch make_nop_latch() {
 }
 
 void init_pipeline(CPU* cpu) {
-    cpu->IF_ID = make_nop_latch();
-    cpu->ID_EX = make_nop_latch();
-    cpu->EX_MEM = make_nop_latch();
-    cpu->MEM_WB = make_nop_latch();
+    cpu->pipeline_IF_ID = make_nop_latch();
+    cpu->pipeline_ID_EX = make_nop_latch();
+    cpu->pipeline_EX_MEM = make_nop_latch();
+    cpu->pipeline_MEM_WB = make_nop_latch();
 }
 
 Instruction parse_line(char *line) {
@@ -159,8 +159,8 @@ int program_load(CPU* cpu, const char *filename) {
 }
 
 bool pipeline_is_empty(const CPU* cpu) {
-    return !cpu->IF_ID.inst.valid && !cpu->ID_EX.inst.valid &&
-           !cpu->EX_MEM.inst.valid && !cpu->MEM_WB.inst.valid;
+    return !cpu->pipeline_IF_ID.inst.valid && !cpu->pipeline_ID_EX.inst.valid &&
+           !cpu->pipeline_EX_MEM.inst.valid && !cpu->pipeline_MEM_WB.inst.valid;
 }
 
 // ---------- IF ----------
@@ -186,13 +186,13 @@ Resolved resolve_operand(const CPU* cpu, int reg) {
     if (reg == -1) return r;
 
     // MEM (EX/MEM) has higher priority than WB (MEM/WB)
-    if (cpu->EX_MEM.inst.valid && cpu->EX_MEM.inst.rd == reg && cpu->EX_MEM.inst.rd != -1) {
-        r.value = cpu->EX_MEM.alu_result;
+    if (cpu->pipeline_EX_MEM.inst.valid && cpu->pipeline_EX_MEM.inst.rd == reg && cpu->pipeline_EX_MEM.inst.rd != -1) {
+        r.value = cpu->pipeline_EX_MEM.alu_result;
         r.src = SRC_MEM;
         return r;
     }
-    if (cpu->MEM_WB.inst.valid && cpu->MEM_WB.inst.rd == reg && cpu->MEM_WB.inst.rd != -1) {
-        r.value = cpu->MEM_WB.alu_result;
+    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd == reg && cpu->pipeline_MEM_WB.inst.rd != -1) {
+        r.value = cpu->pipeline_MEM_WB.alu_result;
         r.src = SRC_WB;
         return r;
     }
@@ -212,15 +212,15 @@ typedef struct {
  * With full ALU-to-ALU forwarding and no loads in this ISA,
  * we do not need stalls. Keep logic here for future loads/branches.
  */
-DecodeResult decode_stage(const CPU* cpu, StageLatch if_id, StageLatch id_ex) {
+DecodeResult decode_stage(const CPU* cpu, StageLatch pipeline_IF_ID, StageLatch pipeline_ID_EX) {
     DecodeResult res;
-    res.next = if_id; // pass-through for this simple ISA
+    res.next = pipeline_IF_ID; // pass-through for this simple ISA
     res.stall = false;
     res.stall_reason = NULL;
 
     // Example of hazard detection skeleton (disabled for this ISA):
-    // if (if_id.inst.valid && id_ex.inst.valid && id_ex.inst.rd != -1) {
-    //     if (if_id.inst.rs1 == id_ex.inst.rd || if_id.inst.rs2 == id_ex.inst.rd) {
+    // if (pipeline_IF_ID.inst.valid && pipeline_ID_EX.inst.valid && pipeline_ID_EX.inst.rd != -1) {
+    //     if (pipeline_IF_ID.inst.rs1 == pipeline_ID_EX.inst.rd || pipeline_IF_ID.inst.rs2 == pipeline_ID_EX.inst.rd) {
     //         // If previous stage was a LOAD, stall (no loads here).
     //     }
     // }
@@ -237,14 +237,14 @@ typedef struct {
 } ExecResult;
 
 
-ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
+ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
     ExecResult r;
-    r.next = id_ex;
+    r.next = pipeline_ID_EX;
     r.branch_taken = false;
     r.target_pc = -1;
-    r.valid = id_ex.inst.valid;
+    r.valid = pipeline_ID_EX.inst.valid;
 
-    if (!id_ex.inst.valid || id_ex.inst.op == OP_NOOP) {
+    if (!pipeline_ID_EX.inst.valid || pipeline_ID_EX.inst.op == OP_NOOP) {
         r.next.val_rs1 = r.next.val_rs2 = 0;
         r.next.src_rs1 = r.next.src_rs2 = SRC_NONE;
         r.next.alu_result = 0;
@@ -252,13 +252,13 @@ ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
     }
 
     //  Defensive: register index validity
-    assert(reg_valid(id_ex.inst.rd));
-    assert(reg_valid(id_ex.inst.rs1));
-    assert(reg_valid(id_ex.inst.rs2));
+    assert(reg_valid(pipeline_ID_EX.inst.rd));
+    assert(reg_valid(pipeline_ID_EX.inst.rs1));
+    assert(reg_valid(pipeline_ID_EX.inst.rs2));
 
     // Forwarding
-    Resolved rs1 = resolve_operand(cpu, id_ex.inst.rs1);
-    Resolved rs2 = resolve_operand(cpu, id_ex.inst.rs2);
+    Resolved rs1 = resolve_operand(cpu, pipeline_ID_EX.inst.rs1);
+    Resolved rs2 = resolve_operand(cpu, pipeline_ID_EX.inst.rs2);
 
 
     r.next.val_rs1 = rs1.value;
@@ -266,10 +266,10 @@ ExecResult execute_stage(const CPU* cpu, StageLatch id_ex) {
     r.next.src_rs1 = rs1.src;
     r.next.src_rs2 = rs2.src;
 
-    assert(id_ex.inst.op >= OP_NOOP && id_ex.inst.op <= OP_MUL);
+    assert(pipeline_ID_EX.inst.op >= OP_NOOP && pipeline_ID_EX.inst.op <= OP_MUL);
 
-    switch (id_ex.inst.op) {
-        case OP_MOV: r.next.alu_result = id_ex.inst.imm; break;
+    switch (pipeline_ID_EX.inst.op) {
+        case OP_MOV: r.next.alu_result = pipeline_ID_EX.inst.imm; break;
         case OP_ADD: r.next.alu_result = rs1.value + rs2.value; break;
         case OP_SUB: r.next.alu_result = rs1.value - rs2.value; break;
         case OP_MUL: r.next.alu_result = rs1.value * rs2.value; break;
@@ -288,23 +288,24 @@ typedef struct {
     StageLatch next;
 } MemResult;
 
-MemResult memory_stage(StageLatch ex_mem) {
+MemResult memory_stage(StageLatch pipeline_EX_MEM) {
     MemResult r;
-    r.next = ex_mem;  // pass-through (no real memory ops in this ISA)
+    r.next = pipeline_EX_MEM;  // pass-through (no real memory ops in this ISA)
     return r;
 }
 
 
 // ---------- WB ----------
 void wb_stage(CPU* cpu) {
-    if (cpu->MEM_WB.inst.valid &&
-        cpu->MEM_WB.inst.op != OP_NOOP &&
-        cpu->MEM_WB.inst.rd != -1) {
-        cpu->R[cpu->MEM_WB.inst.rd] = cpu->MEM_WB.alu_result;
+    if (cpu->pipeline_MEM_WB.inst.valid &&
+        cpu->pipeline_MEM_WB.inst.op != OP_NOOP &&
+        cpu->pipeline_MEM_WB.inst.rd != -1) {
+        cpu->R[cpu->pipeline_MEM_WB.inst.rd] = cpu->pipeline_MEM_WB.alu_result;
     }
 }
 
 // ---------- Pipeline advancement ----------
+
 void advance_pipeline(CPU* cpu,
                       ExecResult ex_res,
                       MemResult mem_res,
@@ -313,20 +314,20 @@ void advance_pipeline(CPU* cpu,
     // Commit WB (already done inside wb_stage)
 
     // MEM → WB
-    cpu->MEM_WB = mem_res.next;
+    cpu->pipeline_MEM_WB = mem_res.next;
 
     // EX → MEM
-    cpu->EX_MEM = ex_res.next;
+    cpu->pipeline_EX_MEM = ex_res.next;
 
     // ID → EX
     if (dec_res.stall)
-        cpu->ID_EX = make_nop_latch();
+        cpu->pipeline_ID_EX = make_nop_latch();
     else
-        cpu->ID_EX = cpu->IF_ID;
+        cpu->pipeline_ID_EX = cpu->pipeline_IF_ID;
 
     // IF → ID
     if (!dec_res.stall) {
-        cpu->IF_ID.inst = fetched_inst;
+        cpu->pipeline_IF_ID.inst = fetched_inst;
         if (cpu->PC < cpu->inst_count) cpu->PC++;
     }
 }
@@ -361,35 +362,35 @@ void print_cycle_state(const CPU* cpu, int cycle, bool stalled, const char* stal
 
     if (stalled) {
         printf("ID    : %-20s (Stalled%s%s)\n",
-               cpu->IF_ID.inst.valid ? cpu->IF_ID.inst.text : "NOP",
+               cpu->pipeline_IF_ID.inst.valid ? cpu->pipeline_IF_ID.inst.text : "NOP",
                stall_reason ? " — " : "",
                stall_reason ? stall_reason : "");
     } else {
-        print_stage_inst("ID", &cpu->IF_ID); printf("\n");
+        print_stage_inst("ID", &cpu->pipeline_IF_ID); printf("\n");
     }
 
-    if (!cpu->ID_EX.inst.valid || cpu->ID_EX.inst.op == OP_NOOP) {
+    if (!cpu->pipeline_ID_EX.inst.valid || cpu->pipeline_ID_EX.inst.op == OP_NOOP) {
         printf("EX    : NOP\n");
-    } else if (cpu->ID_EX.inst.op == OP_MOV) {
+    } else if (cpu->pipeline_ID_EX.inst.op == OP_MOV) {
         printf("EX    : %-20s (imm=%d and result=%d)\n",
-               cpu->ID_EX.inst.text, cpu->ID_EX.inst.imm, cpu->ID_EX.alu_result);
+               cpu->pipeline_ID_EX.inst.text, cpu->pipeline_ID_EX.inst.imm, cpu->pipeline_ID_EX.alu_result);
     } else {
         printf("EX    : %-20s (R%d=%d[%s], R%d=%d[%s]; result=%d)\n",
-               cpu->ID_EX.inst.text,
-               cpu->ID_EX.inst.rs1, cpu->ID_EX.val_rs1, src_name(cpu->ID_EX.src_rs1),
-               cpu->ID_EX.inst.rs2, cpu->ID_EX.val_rs2, src_name(cpu->ID_EX.src_rs2),
-               cpu->ID_EX.alu_result);
+               cpu->pipeline_ID_EX.inst.text,
+               cpu->pipeline_ID_EX.inst.rs1, cpu->pipeline_ID_EX.val_rs1, src_name(cpu->pipeline_ID_EX.src_rs1),
+               cpu->pipeline_ID_EX.inst.rs2, cpu->pipeline_ID_EX.val_rs2, src_name(cpu->pipeline_ID_EX.src_rs2),
+               cpu->pipeline_ID_EX.alu_result);
     }
 
-    print_stage_inst("MEM", &cpu->EX_MEM); printf("\n");
+    print_stage_inst("MEM", &cpu->pipeline_EX_MEM); printf("\n");
 
-    if (cpu->MEM_WB.inst.valid && cpu->MEM_WB.inst.rd != -1 && cpu->MEM_WB.inst.op != OP_NOOP) {
+    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd != -1 && cpu->pipeline_MEM_WB.inst.op != OP_NOOP) {
         printf("WB    : %-20s (write R%d=%d)\n",
-               cpu->MEM_WB.inst.text,
-               cpu->MEM_WB.inst.rd,
-               cpu->MEM_WB.alu_result);
+               cpu->pipeline_MEM_WB.inst.text,
+               cpu->pipeline_MEM_WB.inst.rd,
+               cpu->pipeline_MEM_WB.alu_result);
     } else {
-        print_stage_inst("WB", &cpu->MEM_WB); printf("\n");
+        print_stage_inst("WB", &cpu->pipeline_MEM_WB); printf("\n");
     }
 
     // Registers
@@ -416,32 +417,32 @@ int main() {
     init_pipeline(&cpu);
     int cycle = 1;
 
-    // Prime IF_ID with first fetch so the first cycle shows ID properly
+    // Prime pipeline_IF_ID with first fetch so the first cycle shows ID properly
     Instruction first;
     fetch_stage(&cpu, &first);
-    cpu.IF_ID.inst = first;
+    cpu.pipeline_IF_ID.inst = first;
     if (cpu.PC < cpu.inst_count) cpu.PC++;
 
  while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
     // ---- Phase 1: compute ----
     wb_stage(&cpu);
-   MemResult mem_res = memory_stage(cpu.EX_MEM);
-ExecResult ex_res = execute_stage(&cpu, cpu.ID_EX);
+   MemResult mem_res = memory_stage(cpu.pipeline_EX_MEM);
+ExecResult ex_res = execute_stage(&cpu, cpu.pipeline_ID_EX);
 
-    DecodeResult dec_res = decode_stage(&cpu, cpu.IF_ID, cpu.ID_EX);
+    DecodeResult dec_res = decode_stage(&cpu, cpu.pipeline_IF_ID, cpu.pipeline_ID_EX);
     Instruction fetched_inst;
     fetch_stage(&cpu, &fetched_inst);
 
     // ---- Phase 2: print ----
     // ---- Phase 2: print ----
 // Use the execute result just for printing the EX line
-StageLatch saved_id_ex = cpu.ID_EX;
-cpu.ID_EX = ex_res.next;
+StageLatch saved_pipeline_ID_EX = cpu.pipeline_ID_EX;
+cpu.pipeline_ID_EX = ex_res.next;
 
 print_cycle_state(&cpu, cycle, dec_res.stall, dec_res.stall_reason);
 
 // Restore the original latched view before we advance
-cpu.ID_EX = saved_id_ex;
+cpu.pipeline_ID_EX = saved_pipeline_ID_EX;
 
 
     // ---- Phase 3: latch update ----
