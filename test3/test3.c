@@ -2,10 +2,15 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <assert.h>
 
 #define NUM_REGS 16
 #define LINE_LEN 64
 #define MAX_INST 256
+
+static inline bool reg_valid(int r) {
+    return r == -1 || (r >= 0 && r < NUM_REGS);
+}
 
 // ---------- ISA ----------
 typedef enum { OP_NOOP, OP_MOV, OP_ADD, OP_SUB, OP_MUL } OpCode;
@@ -456,5 +461,6 @@ cpu.ID_EX = saved_id_ex;
 
     return 0;
 }
+
 
 
