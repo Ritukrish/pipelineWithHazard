@@ -8,6 +8,12 @@
 #define LINE_LEN 64
 #define MAX_INST 256
 
+/**
+ * @brief Validate register index
+ * @param r Register index (0..NUM_REGS-1, or -1 for unused)
+ * @return true if valid, false otherwise
+ */
+
 static inline bool reg_valid(int r) {
     return r == -1 || (r >= 0 && r < NUM_REGS);
 }
@@ -57,7 +63,10 @@ const char* opcode_name(OpCode op) {
         default: return "UNK";
     }
 }
-
+/**
+ * @brief Construct a NOP instruction
+ * @return Instruction representing a no-op
+ */
 Instruction make_nop() {
     Instruction i;
     i.op = OP_NOOP;
@@ -89,7 +98,11 @@ void init_pipeline(CPU* cpu) {
     cpu->pipeline_EX_MEM = make_nop_latch();
     cpu->pipeline_MEM_WB = make_nop_latch();
 }
-
+/**
+ * @brief Parse a line of assembly into an Instruction
+ * @param line Input string (one assembly instruction)
+ * @return Parsed Instruction (valid=0 if error, with error text)
+ */
 Instruction parse_line(char *line) {
     Instruction ins = make_nop();
     char temp_line[LINE_LEN];
@@ -139,7 +152,12 @@ Instruction parse_line(char *line) {
     return ins;
 }
 
-
+/**
+ * @brief Load program into CPU instruction memory
+ * @param cpu CPU state pointer
+ * @param filename File containing assembly instructions
+ * @return 0 on success, -1 if file could not be opened
+ */
 int program_load(CPU* cpu, const char *filename) {
     FILE *f = fopen(filename, "r");
     if (!f) return -1;
@@ -162,7 +180,11 @@ bool pipeline_is_empty(const CPU* cpu) {
     return !cpu->pipeline_IF_ID.inst.valid && !cpu->pipeline_ID_EX.inst.valid &&
            !cpu->pipeline_EX_MEM.inst.valid && !cpu->pipeline_MEM_WB.inst.valid;
 }
-
+/**
+ * @brief Instruction Fetch (IF) stage
+ * @param cpu CPU pointer
+ * @param fetched_inst Output pointer to hold fetched instruction
+ */
 // ---------- IF ----------
 void fetch_stage(CPU* cpu, Instruction* fetched_inst) {
     assert(cpu->PC >= 0 && cpu->PC <= cpu->inst_count);  // ✅ PC must be in range
@@ -208,9 +230,12 @@ typedef struct {
     const char* stall_reason;
 } DecodeResult;
 
-/*
- * With full ALU-to-ALU forwarding and no loads in this ISA,
- * we do not need stalls. Keep logic here for future loads/branches.
+/**
+ * @brief Instruction Decode (ID) stage
+ * @param cpu CPU state
+ * @param pipeline_IF_ID Current IF/ID latch
+ * @param pipeline_ID_EX Current ID/EX latch
+ * @return DecodeResult (next ID/EX latch + stall info)
  */
 DecodeResult decode_stage(const CPU* cpu, StageLatch pipeline_IF_ID, StageLatch pipeline_ID_EX) {
     DecodeResult res;
@@ -236,7 +261,12 @@ typedef struct {
     bool valid;          // whether this result is valid
 } ExecResult;
 
-
+/**
+ * @brief Execute one instruction in EX stage
+ * @param cpu CPU state
+ * @param pipeline_ID_EX Current ID/EX latch
+ * @return ExecResult (EX/MEM latch + ALU result + branch info)
+ */
 ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
     ExecResult r;
     r.next = pipeline_ID_EX;
@@ -287,14 +317,21 @@ ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
 typedef struct {
     StageLatch next;
 } MemResult;
-
+/**
+ * @brief Memory stage (pass-through for this ISA)
+ * @param pipeline_EX_MEM Current EX/MEM latch
+ * @return MemResult (MEM/WB latch)
+ */
 MemResult memory_stage(StageLatch pipeline_EX_MEM) {
     MemResult r;
     r.next = pipeline_EX_MEM;  // pass-through (no real memory ops in this ISA)
     return r;
 }
 
-
+/**
+ * @brief Write-back (WB) stage
+ * @param cpu CPU state pointer
+ */
 // ---------- WB ----------
 void wb_stage(CPU* cpu) {
     if (cpu->pipeline_MEM_WB.inst.valid &&
@@ -305,7 +342,14 @@ void wb_stage(CPU* cpu) {
 }
 
 // ---------- Pipeline advancement ----------
-
+/**
+ * @brief Advance all pipeline latches by one cycle
+ * @param cpu CPU state
+ * @param ex_res Result of EX stage
+ * @param mem_res Result of MEM stage
+ * @param fetched_inst Instruction fetched in IF
+ * @param dec_res Decode stage result (including stall info)
+ */
 void advance_pipeline(CPU* cpu,
                       ExecResult ex_res,
                       MemResult mem_res,
@@ -351,7 +395,13 @@ void print_stage_inst(const char *name, const StageLatch *s) {
     }
     printf("%-6s: %-20s", name, s->inst.text);
 }
-
+/**
+ * @brief Print pipeline and register state for the given cycle
+ * @param cpu CPU state
+ * @param cycle Current cycle number
+ * @param stalled Whether the decode stage stalled
+ * @param stall_reason String explaining stall reason (optional)
+ */
 void print_cycle_state(const CPU* cpu, int cycle, bool stalled, const char* stall_reason) {
     printf("\n================ Cycle %d ================\n", cycle);
 
@@ -403,6 +453,10 @@ void print_cycle_state(const CPU* cpu, int cycle, bool stalled, const char* stal
 }
 
 // ---------- main ----------
+/**
+ * @brief Main entry point: load program, run pipeline simulation
+ * @return 0 on success, 1 if program load failed
+ */
 int main() {
     CPU cpu;
     memset(&cpu, 0, sizeof(CPU));
