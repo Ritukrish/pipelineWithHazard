@@ -62,6 +62,12 @@ Instruction make_nop() {
     strcpy(i.text, "NOP");
     return i;
 }
+Instruction create_invalid_instruction(const char *reason) {
+    Instruction ins = make_nop();
+    ins.valid = 0;
+    snprintf(ins.text, LINE_LEN, "ERROR: %s", reason);
+    return ins;
+}
 
 StageLatch make_nop_latch() {
     StageLatch s;
@@ -80,40 +86,54 @@ void init_pipeline(CPU* cpu) {
 }
 
 Instruction parse_line(char *line) {
-    Instruction ins;
-    ins.op = OP_NOOP;
-    ins.rd = ins.rs1 = ins.rs2 = -1;
-    ins.imm = 0;
-    ins.valid = 0;
+    Instruction ins = make_nop();
+    char temp_line[LINE_LEN];
+    strcpy(temp_line, line);
 
-    line[strcspn(line, "\n")] = 0;
-    while(*line == ' ' || *line == '\t') line++;
-    if (strlen(line) == 0) return ins;
+    char *opcode_str = strtok(temp_line, " ,\t\n");
+    if (!opcode_str) return create_invalid_instruction("Missing opcode");
 
-    strcpy(ins.text, line);
-    char opstr[8] = {0};
-    sscanf(line, "%7s", opstr);
-
-    if (strcasecmp(opstr, "mov") == 0) {
+    if (strcasecmp(opcode_str, "mov") == 0) {
         ins.op = OP_MOV;
-        // Accept formats like: mov R1, 5  (with optional spaces)
-        sscanf(line, "%*s R%d , %d", &ins.rd, &ins.imm);
-        ins.valid = 1;
-    } else if (strcasecmp(opstr, "add") == 0) {
-        ins.op = OP_ADD;
-        sscanf(line, "%*s R%d , R%d , R%d", &ins.rd, &ins.rs1, &ins.rs2);
-        ins.valid = 1;
-    } else if (strcasecmp(opstr, "sub") == 0) {
-        ins.op = OP_SUB;
-        sscanf(line, "%*s R%d , R%d , R%d", &ins.rd, &ins.rs1, &ins.rs2);
-        ins.valid = 1;
-    } else if (strcasecmp(opstr, "mul") == 0) {
-        ins.op = OP_MUL;
-        sscanf(line, "%*s R%d , R%d , R%d", &ins.rd, &ins.rs1, &ins.rs2);
+        char *rd_str = strtok(NULL, " ,\t\n");
+        char *imm_str = strtok(NULL, " ,\t\n");
+
+        if (!rd_str || sscanf(rd_str, "R%d", &ins.rd) != 1 || ins.rd < 0 || ins.rd >= NUM_REGS)
+            return create_invalid_instruction("Invalid destination register in MOV");
+        if (!imm_str || sscanf(imm_str, "%d", &ins.imm) != 1)
+            return create_invalid_instruction("Invalid immediate in MOV");
+
         ins.valid = 1;
     }
+    else if (strcasecmp(opcode_str, "add") == 0 ||
+             strcasecmp(opcode_str, "sub") == 0 ||
+             strcasecmp(opcode_str, "mul") == 0) {
+
+        if (strcasecmp(opcode_str, "add") == 0) ins.op = OP_ADD;
+        else if (strcasecmp(opcode_str, "sub") == 0) ins.op = OP_SUB;
+        else ins.op = OP_MUL;
+
+        char *rd_str  = strtok(NULL, " ,\t\n");
+        char *rs1_str = strtok(NULL, " ,\t\n");
+        char *rs2_str = strtok(NULL, " ,\t\n");
+
+        if (!rd_str  || sscanf(rd_str, "R%d", &ins.rd)  != 1 || ins.rd  < 0 || ins.rd  >= NUM_REGS)
+            return create_invalid_instruction("Invalid destination register");
+        if (!rs1_str || sscanf(rs1_str,"R%d",&ins.rs1)!= 1 || ins.rs1 < 0 || ins.rs1 >= NUM_REGS)
+            return create_invalid_instruction("Invalid source register 1");
+        if (!rs2_str || sscanf(rs2_str,"R%d",&ins.rs2)!= 1 || ins.rs2 < 0 || ins.rs2 >= NUM_REGS)
+            return create_invalid_instruction("Invalid source register 2");
+
+        ins.valid = 1;
+    }
+    else {
+        return create_invalid_instruction("Unknown opcode");
+    }
+
+    strcpy(ins.text, line);
     return ins;
 }
+
 
 int program_load(CPU* cpu, const char *filename) {
     FILE *f = fopen(filename, "r");
@@ -121,11 +141,14 @@ int program_load(CPU* cpu, const char *filename) {
     char line[LINE_LEN];
     cpu->inst_count = 0;
     while (fgets(line, sizeof(line), f) && cpu->inst_count < MAX_INST) {
-        Instruction ins = parse_line(line);
-        if (ins.valid) {
-            cpu->program[cpu->inst_count++] = ins;
-        }
+    Instruction ins = parse_line(line);
+    if (ins.valid) {
+        cpu->program[cpu->inst_count++] = ins;
+    } else {
+        fprintf(stderr, "Parse error at line %d: %s\n", cpu->inst_count+1, ins.text);
     }
+}
+
     fclose(f);
     return 0;
 }
@@ -422,3 +445,4 @@ cpu.ID_EX = saved_id_ex;
 
     return 0;
 }
+
