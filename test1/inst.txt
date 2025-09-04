@@ -1,5 +1,0 @@
-mov R1, 1
-mov R2, 3
-add R3, R1, R2
-sub R4, R1, R2
-mul R5, R1, R2
