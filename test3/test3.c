@@ -103,46 +103,78 @@ void init_pipeline(CPU* cpu) {
  * @param line Input string (one assembly instruction)
  * @return Parsed Instruction (valid=0 if error, with error text)
  */
-Instruction parse_line(char *line) {
+// ---------- Modular Parsing ----------
+
+/**
+ * @brief Parse MOV instruction
+ */
+Instruction parse_mov(char *rd_str, char *imm_str) {
     Instruction ins = make_nop();
+
+    if (!rd_str || sscanf(rd_str, "R%d", &ins.rd) != 1 || ins.rd < 0 || ins.rd >= NUM_REGS)
+        return create_invalid_instruction("Invalid destination register in MOV");
+
+    if (!imm_str || sscanf(imm_str, "%d", &ins.imm) != 1)
+        return create_invalid_instruction("Invalid immediate in MOV");
+
+    ins.op = OP_MOV;
+    ins.rs1 = ins.rs2 = -1;
+    ins.valid = 1;
+    return ins;
+}
+
+/**
+ * @brief Parse R-type instruction (ADD, SUB, MUL)
+ */
+Instruction parse_rtype(OpCode op, char *rd_str, char *rs1_str, char *rs2_str) {
+    Instruction ins = make_nop();
+
+    if (!rd_str  || sscanf(rd_str, "R%d", &ins.rd)  != 1 || ins.rd  < 0 || ins.rd  >= NUM_REGS)
+        return create_invalid_instruction("Invalid destination register");
+
+    if (!rs1_str || sscanf(rs1_str, "R%d", &ins.rs1) != 1 || ins.rs1 < 0 || ins.rs1 >= NUM_REGS)
+        return create_invalid_instruction("Invalid source register 1");
+
+    if (!rs2_str || sscanf(rs2_str, "R%d", &ins.rs2) != 1 || ins.rs2 < 0 || ins.rs2 >= NUM_REGS)
+        return create_invalid_instruction("Invalid source register 2");
+
+    ins.op = op;
+    ins.imm = 0;
+    ins.valid = 1;
+    return ins;
+}
+
+/**
+ * @brief Dispatch parsing based on opcode
+ */
+Instruction parse_line(char *line) {
     char temp_line[LINE_LEN];
     strcpy(temp_line, line);
 
     char *opcode_str = strtok(temp_line, " ,\t\n");
-    if (!opcode_str) return create_invalid_instruction("Missing opcode");
+    if (!opcode_str)
+        return create_invalid_instruction("Missing opcode");
+
+    Instruction ins = make_nop();
 
     if (strcasecmp(opcode_str, "mov") == 0) {
-        ins.op = OP_MOV;
+        // MOV R1, 10
         char *rd_str = strtok(NULL, " ,\t\n");
         char *imm_str = strtok(NULL, " ,\t\n");
-
-        if (!rd_str || sscanf(rd_str, "R%d", &ins.rd) != 1 || ins.rd < 0 || ins.rd >= NUM_REGS)
-            return create_invalid_instruction("Invalid destination register in MOV");
-        if (!imm_str || sscanf(imm_str, "%d", &ins.imm) != 1)
-            return create_invalid_instruction("Invalid immediate in MOV");
-
-        ins.valid = 1;
+        ins = parse_mov(rd_str, imm_str);
     }
     else if (strcasecmp(opcode_str, "add") == 0 ||
              strcasecmp(opcode_str, "sub") == 0 ||
              strcasecmp(opcode_str, "mul") == 0) {
+        
+        OpCode op = (strcasecmp(opcode_str, "add") == 0) ? OP_ADD :
+                    (strcasecmp(opcode_str, "sub") == 0) ? OP_SUB : OP_MUL;
 
-        if (strcasecmp(opcode_str, "add") == 0) ins.op = OP_ADD;
-        else if (strcasecmp(opcode_str, "sub") == 0) ins.op = OP_SUB;
-        else ins.op = OP_MUL;
-
+        // ADD R1, R2, R3
         char *rd_str  = strtok(NULL, " ,\t\n");
         char *rs1_str = strtok(NULL, " ,\t\n");
         char *rs2_str = strtok(NULL, " ,\t\n");
-
-        if (!rd_str  || sscanf(rd_str, "R%d", &ins.rd)  != 1 || ins.rd  < 0 || ins.rd  >= NUM_REGS)
-            return create_invalid_instruction("Invalid destination register");
-        if (!rs1_str || sscanf(rs1_str,"R%d",&ins.rs1)!= 1 || ins.rs1 < 0 || ins.rs1 >= NUM_REGS)
-            return create_invalid_instruction("Invalid source register 1");
-        if (!rs2_str || sscanf(rs2_str,"R%d",&ins.rs2)!= 1 || ins.rs2 < 0 || ins.rs2 >= NUM_REGS)
-            return create_invalid_instruction("Invalid source register 2");
-
-        ins.valid = 1;
+        ins = parse_rtype(op, rd_str, rs1_str, rs2_str);
     }
     else {
         return create_invalid_instruction("Unknown opcode");
@@ -151,6 +183,27 @@ Instruction parse_line(char *line) {
     strcpy(ins.text, line);
     return ins;
 }
+// ---------- Modular ALU ----------
+
+/**
+ * @brief Perform ALU operation
+ * @param op   The operation code
+ * @param a    Operand 1
+ * @param b    Operand 2
+ * @param imm  Immediate value (used for MOV)
+ * @return Computed result
+ */
+int alu_execute(OpCode op, int a, int b, int imm) {
+    switch (op) {
+        case OP_MOV: return imm;
+        case OP_ADD: return a + b;
+        case OP_SUB: return a - b;
+        case OP_MUL: return a * b;
+        case OP_NOOP: return 0;
+        default: return 0;
+    }
+}
+
 
 /**
  * @brief Load program into CPU instruction memory
@@ -281,32 +334,22 @@ ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
         return r;
     }
 
-    //  Defensive: register index validity
+    // Defensive: register validity
     assert(reg_valid(pipeline_ID_EX.inst.rd));
     assert(reg_valid(pipeline_ID_EX.inst.rs1));
     assert(reg_valid(pipeline_ID_EX.inst.rs2));
 
-    // Forwarding
+    // Resolve operands with forwarding
     Resolved rs1 = resolve_operand(cpu, pipeline_ID_EX.inst.rs1);
     Resolved rs2 = resolve_operand(cpu, pipeline_ID_EX.inst.rs2);
-
 
     r.next.val_rs1 = rs1.value;
     r.next.val_rs2 = rs2.value;
     r.next.src_rs1 = rs1.src;
     r.next.src_rs2 = rs2.src;
 
-    assert(pipeline_ID_EX.inst.op >= OP_NOOP && pipeline_ID_EX.inst.op <= OP_MUL);
-
-    switch (pipeline_ID_EX.inst.op) {
-        case OP_MOV: r.next.alu_result = pipeline_ID_EX.inst.imm; break;
-        case OP_ADD: r.next.alu_result = rs1.value + rs2.value; break;
-        case OP_SUB: r.next.alu_result = rs1.value - rs2.value; break;
-        case OP_MUL: r.next.alu_result = rs1.value * rs2.value; break;
-        default:
-            r.next.alu_result = 0;
-            break;
-    }
+    // Use modular ALU
+    r.next.alu_result = alu_execute(pipeline_ID_EX.inst.op, rs1.value, rs2.value, pipeline_ID_EX.inst.imm);
 
     return r;
 }
@@ -516,6 +559,7 @@ cpu.pipeline_ID_EX = saved_pipeline_ID_EX;
 
     return 0;
 }
+
 
 
 
