@@ -377,12 +377,18 @@ MemResult memory_stage(StageLatch pipeline_EX_MEM) {
  */
 // ---------- WB ----------
 void wb_stage(CPU* cpu) {
-    if (cpu->pipeline_MEM_WB.inst.valid &&
-        cpu->pipeline_MEM_WB.inst.op != OP_NOOP &&
-        cpu->pipeline_MEM_WB.inst.rd != -1) {
-        cpu->R[cpu->pipeline_MEM_WB.inst.rd] = cpu->pipeline_MEM_WB.alu_result;
+    const Instruction* w = &cpu->pipeline_MEM_WB.inst;
+
+    // Only write if instruction is valid, not NOP, and destination is used
+    if (w->valid && w->op != OP_NOOP && w->rd != -1) {
+        // Defensive assertion: rd must be a valid register
+        assert(reg_valid(w->rd));
+
+        // Perform the write-back
+        cpu->R[w->rd] = cpu->pipeline_MEM_WB.alu_result;
     }
 }
+
 
 // ---------- Pipeline advancement ----------
 /**
@@ -406,8 +412,10 @@ void advance_pipeline(CPU* cpu,
                       MemResult mem_res,
                       Instruction fetched_inst,
                       DecodeResult dec_res) {
-    // Commit WB (already done inside wb_stage)
+    // Defensive assertion: PC must always be within valid range
+    assert(cpu->PC >= 0 && cpu->PC <= cpu->inst_count);
 
+    // Commit WB (already done inside wb_stage)
     // MEM → WB
     cpu->pipeline_MEM_WB = mem_res.next;
 
@@ -424,12 +432,13 @@ void advance_pipeline(CPU* cpu,
     if (!dec_res.stall) {
         cpu->pipeline_IF_ID.inst = fetched_inst;
 
-        // PC is incremented ONLY here (centralized)
+        // Centralized PC increment
         if (cpu->PC < cpu->inst_count) {
             cpu->PC++;
         }
     }
 }
+
 
 
 
@@ -572,6 +581,7 @@ cpu.pipeline_ID_EX = saved_pipeline_ID_EX;
 
     return 0;
 }
+
 
 
 
