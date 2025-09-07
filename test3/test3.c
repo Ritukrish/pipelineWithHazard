@@ -7,16 +7,18 @@
 #define NUM_REGS 16
 #define LINE_LEN 64
 #define MAX_INST 256
+#define REG_UNUSED (-1)
+
 
 /**
  * @brief Validate register index
  * @param r Register index (0..NUM_REGS-1, or -1 for unused)
  * @return true if valid, false otherwise
  */
-
 static inline bool reg_valid(int r) {
-    return r == -1 || (r >= 0 && r < NUM_REGS);
+    return r == REG_UNUSED || (r >= 0 && r < NUM_REGS);
 }
+
 
 // ---------- ISA ----------
 typedef enum { OP_NOOP, OP_MOV, OP_ADD, OP_SUB, OP_MUL } OpCode;
@@ -70,18 +72,19 @@ const char* opcode_name(OpCode op) {
 Instruction make_nop() {
     Instruction i;
     i.op = OP_NOOP;
-    i.rd = i.rs1 = i.rs2 = -1;
+    i.rd = i.rs1 = i.rs2 = REG_UNUSED;
     i.imm = 0;
     i.valid = 0;
     strcpy(i.text, "NOP");
     return i;
 }
-Instruction create_invalid_instruction(const char *reason) {
-    Instruction ins = make_nop();
+Instruction make_invalid_instruction(const char *reason) {
+    Instruction ins = make_nop(); // create a NOP as base
     ins.valid = 0;
     snprintf(ins.text, LINE_LEN, "ERROR: %s", reason);
     return ins;
 }
+
 
 StageLatch make_nop_latch() {
     StageLatch s;
@@ -112,13 +115,13 @@ Instruction parse_mov(char *rd_str, char *imm_str) {
     Instruction ins = make_nop();
 
     if (!rd_str || sscanf(rd_str, "R%d", &ins.rd) != 1 || ins.rd < 0 || ins.rd >= NUM_REGS)
-        return create_invalid_instruction("Invalid destination register in MOV");
+        return make_invalid_instruction("Invalid destination register in MOV");
 
     if (!imm_str || sscanf(imm_str, "%d", &ins.imm) != 1)
-        return create_invalid_instruction("Invalid immediate in MOV");
+        return make_invalid_instruction("Invalid immediate in MOV");
 
     ins.op = OP_MOV;
-    ins.rs1 = ins.rs2 = -1;
+    ins.rs1 = ins.rs2 = REG_UNUSED;
     ins.valid = 1;
     return ins;
 }
@@ -130,13 +133,13 @@ Instruction parse_rtype(OpCode op, char *rd_str, char *rs1_str, char *rs2_str) {
     Instruction ins = make_nop();
 
     if (!rd_str  || sscanf(rd_str, "R%d", &ins.rd)  != 1 || ins.rd  < 0 || ins.rd  >= NUM_REGS)
-        return create_invalid_instruction("Invalid destination register");
+        return make_invalid_instruction("Invalid destination register");
 
     if (!rs1_str || sscanf(rs1_str, "R%d", &ins.rs1) != 1 || ins.rs1 < 0 || ins.rs1 >= NUM_REGS)
-        return create_invalid_instruction("Invalid source register 1");
+        return make_invalid_instruction("Invalid source register 1");
 
     if (!rs2_str || sscanf(rs2_str, "R%d", &ins.rs2) != 1 || ins.rs2 < 0 || ins.rs2 >= NUM_REGS)
-        return create_invalid_instruction("Invalid source register 2");
+        return make_invalid_instruction("Invalid source register 2");
 
     ins.op = op;
     ins.imm = 0;
@@ -153,7 +156,7 @@ Instruction parse_line(char *line) {
 
     char *opcode_str = strtok(temp_line, " ,\t\n");
     if (!opcode_str)
-        return create_invalid_instruction("Missing opcode");
+        return make_invalid_instruction("Missing opcode");
 
     Instruction ins = make_nop();
 
@@ -177,7 +180,7 @@ Instruction parse_line(char *line) {
         ins = parse_rtype(op, rd_str, rs1_str, rs2_str);
     }
     else {
-        return create_invalid_instruction("Unknown opcode");
+        return make_invalid_instruction("Unknown opcode");
     }
 
     strcpy(ins.text, line);
@@ -261,12 +264,12 @@ Resolved resolve_operand(const CPU* cpu, int reg) {
     if (reg == -1) return r;
 
     // MEM (EX/MEM) has higher priority than WB (MEM/WB)
-    if (cpu->pipeline_EX_MEM.inst.valid && cpu->pipeline_EX_MEM.inst.rd == reg && cpu->pipeline_EX_MEM.inst.rd != -1) {
+    if (cpu->pipeline_EX_MEM.inst.valid && cpu->pipeline_EX_MEM.inst.rd == reg && cpu->pipeline_EX_MEM.inst.rd != REG_UNUSED) {
         r.value = cpu->pipeline_EX_MEM.alu_result;
         r.src = SRC_MEM;
         return r;
     }
-    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd == reg && cpu->pipeline_MEM_WB.inst.rd != -1) {
+    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd == reg && cpu->pipeline_MEM_WB.inst.rd != REG_UNUSED) {
         r.value = cpu->pipeline_MEM_WB.alu_result;
         r.src = SRC_WB;
         return r;
@@ -378,16 +381,12 @@ MemResult memory_stage(StageLatch pipeline_EX_MEM) {
 // ---------- WB ----------
 void wb_stage(CPU* cpu) {
     const Instruction* w = &cpu->pipeline_MEM_WB.inst;
-
-    // Only write if instruction is valid, not NOP, and destination is used
-    if (w->valid && w->op != OP_NOOP && w->rd != -1) {
-        // Defensive assertion: rd must be a valid register
+    if (w->valid && w->op != OP_NOOP && w->rd != REG_UNUSED) {
         assert(reg_valid(w->rd));
-
-        // Perform the write-back
         cpu->R[w->rd] = cpu->pipeline_MEM_WB.alu_result;
     }
 }
+
 
 
 // ---------- Pipeline advancement ----------
@@ -499,7 +498,7 @@ void print_cycle_state(const CPU* cpu, int cycle, bool stalled, const char* stal
 
     print_stage_inst("MEM", &cpu->pipeline_EX_MEM); printf("\n");
 
-    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd != -1 && cpu->pipeline_MEM_WB.inst.op != OP_NOOP) {
+    if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd != REG_UNUSED && cpu->pipeline_MEM_WB.inst.op != OP_NOOP) {
         printf("WB    : %-20s (write R%d=%d)\n",
                cpu->pipeline_MEM_WB.inst.text,
                cpu->pipeline_MEM_WB.inst.rd,
