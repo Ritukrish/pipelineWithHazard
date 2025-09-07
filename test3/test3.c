@@ -393,6 +393,14 @@ void wb_stage(CPU* cpu) {
  * @param fetched_inst Instruction fetched in IF
  * @param dec_res Decode stage result (including stall info)
  */
+/**
+ * @brief Advance all pipeline latches by one cycle
+ * @param cpu CPU state
+ * @param ex_res Result of EX stage
+ * @param mem_res Result of MEM stage
+ * @param fetched_inst Instruction fetched in IF
+ * @param dec_res Decode stage result (including stall info)
+ */
 void advance_pipeline(CPU* cpu,
                       ExecResult ex_res,
                       MemResult mem_res,
@@ -415,9 +423,14 @@ void advance_pipeline(CPU* cpu,
     // IF → ID
     if (!dec_res.stall) {
         cpu->pipeline_IF_ID.inst = fetched_inst;
-        if (cpu->PC < cpu->inst_count) cpu->PC++;
+
+        // PC is incremented ONLY here (centralized)
+        if (cpu->PC < cpu->inst_count) {
+            cpu->PC++;
+        }
     }
 }
+
 
 
 // ---------- Pretty printing ----------
@@ -446,7 +459,7 @@ void print_stage_inst(const char *name, const StageLatch *s) {
  * @param stall_reason String explaining stall reason (optional)
  */
 void print_cycle_state(const CPU* cpu, int cycle, bool stalled, const char* stall_reason) {
-    printf("\n================ Cycle %d ================\n", cycle);
+    printf("\n================ Cycle %d ================ Pc : %d\n", cycle, cpu->PC);
 
     if (cpu->PC < cpu->inst_count)
         printf("IF    : Fetching '%s'%s\n", cpu->program[cpu->PC].text, stalled ? " (stall→refetch)" : "");
@@ -515,10 +528,10 @@ int main() {
     int cycle = 1;
 
     // Prime pipeline_IF_ID with first fetch so the first cycle shows ID properly
-    Instruction first;
-    fetch_stage(&cpu, &first);
-    cpu.pipeline_IF_ID.inst = first;
-    if (cpu.PC < cpu.inst_count) cpu.PC++;
+       Instruction first;
+fetch_stage(&cpu, &first);        // Fetch first instruction
+cpu.pipeline_IF_ID.inst = first;  // Load into IF/ID latch
+cpu.PC++;                         // ✅ Increment PC once here
 
  while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
     // ---- Phase 1: compute ----
@@ -559,6 +572,7 @@ cpu.pipeline_ID_EX = saved_pipeline_ID_EX;
 
     return 0;
 }
+
 
 
 
