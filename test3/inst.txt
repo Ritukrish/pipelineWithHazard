@@ -1,5 +1,9 @@
-mov R1, 1
-mov R2, 3
+mov R0, 100
+mov R1, 10
+mov R2, 20
 add R3, R1, R2
-sub R4, R1, R2
-mul R5, R1, R2
+store R3, 8(R0)
+mov R4, 5
+load R5, 8(R0)
+sub R6, R5, R4
+mul R7, R5, R4
