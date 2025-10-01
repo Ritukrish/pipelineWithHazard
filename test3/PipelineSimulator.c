@@ -13,8 +13,7 @@
 #define MEMORY_SIZE 4096
 #define REGISTER_MEMORY_BASE 1000   // starting address for registers in memory
 
-int memory[MEMORY_SIZE]; // global memory
-int R[NUM_REGS];  // Register file
+
 
 
 /**
@@ -488,50 +487,24 @@ MemResult memory_stage(CPU* cpu, StageLatch pipeline_EX_MEM) {
     }
 
 if (pipeline_EX_MEM.inst.op == OP_STORE) {
-    int base_register = pipeline_EX_MEM.inst.rs2;  // R0
-    int offset = pipeline_EX_MEM.inst.imm;         // 8
-    int source_register = pipeline_EX_MEM.inst.rs1; // R3 (value to store)
-
-    // Step 1: find where R0 itself lives in memory
-    int address_of_R0 = get_register_address(base_register);
-
-    // Step 2: calculate effective address
-    int effective_address = address_of_R0 + offset;
-
-    // Step 3: store R3's value into memory at that address
-    memory[effective_address] = R[source_register];
-
-    printf("[MEM] STORE: R%d(%d) -> Memory[%d] (base addr=%d + offset=%d)\n",
+    int effective_address = pipeline_EX_MEM.alu_result; // already computed in EX stage
+    int source_register = pipeline_EX_MEM.inst.rs1;
+    cpu->memory[effective_address / 4] = pipeline_EX_MEM.val_rs1; // word-addressed memory
+    printf("[MEM] STORE: R%d(%d) -> Memory[%d]\n",
            source_register,
-           R[source_register],
-           effective_address,
-           address_of_R0,
-           offset);
+           pipeline_EX_MEM.val_rs1,
+           effective_address);
 }
-
-
-
 else if (pipeline_EX_MEM.inst.op == OP_LOAD) {
-    int base_register = pipeline_EX_MEM.inst.rs1;  // R0
-    int offset = pipeline_EX_MEM.inst.imm;         // 8
-    int dest_register = pipeline_EX_MEM.inst.rd;   // R5
-
-    // Step 1: find where R0 itself lives in memory
-    int address_of_R0 = get_register_address(base_register);
-
-    // Step 2: calculate effective address
-    int effective_address = address_of_R0 + offset;
-
-    // Step 3: load value from memory
-    R[dest_register] = memory[effective_address];
-
-    printf("[MEM] LOAD: R%d <- Memory[%d] (value=%d, base addr=%d + offset=%d)\n",
+    int effective_address = pipeline_EX_MEM.alu_result; // already computed in EX stage
+    int dest_register = pipeline_EX_MEM.inst.rd;
+    cpu->R[dest_register] = cpu->memory[effective_address / 4]; // word-addressed memory
+    printf("[MEM] LOAD: R%d <- Memory[%d] (value=%d)\n",
            dest_register,
            effective_address,
-           memory[effective_address],
-           address_of_R0,
-           offset);
+           cpu->R[dest_register]);
 }
+
 
 
  else {
