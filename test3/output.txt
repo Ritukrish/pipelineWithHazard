@@ -1,6 +1,6 @@
 ================ Cycle 1 ================ Pc : 1
-IF    : Fetching 'mov R1, 10'
-ID    : mov R0, 100
+IF    : Fetching 'MOV R1, 10        '
+ID    : MOV R0, 0
 EX    : NOP
 MEM   : NOP
 WB    : NOP
@@ -10,9 +10,9 @@ Registers: R0 =0     R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0    
 
 
 ================ Cycle 2 ================ Pc : 2
-IF    : Fetching 'mov R2, 20'
-ID    : mov R1, 10
-EX    : mov R0, 100          (imm=100 and result=100)
+IF    : Fetching 'MOV R3, 7         '
+ID    : MOV R1, 10
+EX    : MOV R0, 0            (imm=0 and result=0)
 MEM   : NOP
 WB    : NOP
 
@@ -21,10 +21,10 @@ Registers: R0 =0     R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0    
 
 
 ================ Cycle 3 ================ Pc : 3
-IF    : Fetching 'add R3, R1, R2'
-ID    : mov R2, 20
-EX    : mov R1, 10           (imm=10 and result=10)
-MEM   : mov R0, 100
+IF    : Fetching 'STORE R3, 8(R0)   '
+ID    : MOV R3, 7
+EX    : MOV R1, 10           (imm=10 and result=10)
+MEM   : MOV R0, 0
 WB    : NOP
 
 Registers: R0 =0     R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
@@ -32,108 +32,166 @@ Registers: R0 =0     R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0    
 
 
 ================ Cycle 4 ================ Pc : 4
-IF    : Fetching 'store R3, 8(R0)'
-ID    : add R3, R1, R2
-EX    : mov R2, 20           (imm=20 and result=20)
-MEM   : mov R1, 10
-WB    : mov R0, 100          (write R0=100)
+IF    : Fetching 'LOAD R4, 8(R0)    '
+ID    : STORE R3, 8(R0)
+EX    : MOV R3, 7            (imm=7 and result=7)
+MEM   : MOV R1, 10
+WB    : MOV R0, 0            (write R0=0)
 
-Registers: R0 =100   R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
+Registers: R0 =0     R1 =0     R2 =0     R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
            R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
 ================ Cycle 5 ================ Pc : 5
-IF    : Fetching 'mov R4, 5'
-ID    : store R3, 8(R0)
-EX    : add R3, R1, R2       (R1=10[WB], R2=20[MEM]; result=30)
-MEM   : mov R2, 20
-WB    : mov R1, 10           (write R1=10)
+IF    : Fetching 'ADD R2, R1, R4    ' (stall->refetch)
+ID    : LOAD R4, 8(R0)       (Stalled - STORE -> LOAD hazard (same address))
+EX    : STORE R3, 8(R0)      (data R3=7[MEM], base R0=0[RF], offset=8; addr=8)
+MEM   : MOV R3, 7
+WB    : MOV R1, 10           (write R1=10)
 
-Registers: R0 =100   R1 =10    R2 =0     R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
+Registers: R0 =0     R1 =10    R2 =0     R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+[MEM] STORE: R3(7) -> Memory[2] (byte addr=8)
+
+================ Cycle 6 ================ Pc : 5
+IF    : Fetching 'ADD R2, R1, R4    '
+ID    : LOAD R4, 8(R0)
+EX    : NOP
+MEM   : STORE R3, 8(R0)
+WB    : MOV R3, 7            (write R3=7)
+
+Registers: R0 =0     R1 =10    R2 =0     R3 =7     R4 =0     R5 =0     R6 =0     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0     
+
+
+================ Cycle 7 ================ Pc : 6
+IF    : Fetching 'SUB R5, R2, R3    '
+ID    : ADD R2, R1, R4
+EX    : LOAD R4, 8(R0)       (base R0=0[RF], offset=8; addr=8)
+MEM   : NOP
+WB    : STORE R3, 8(R0)
+
+Registers: R0 =0     R1 =10    R2 =0     R3 =7     R4 =0     R5 =0     R6 =0     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+[MEM] LOAD: Memory[2] (byte addr=8) -> value=7 (dest R4)
+
+================ Cycle 8 ================ Pc : 7
+IF    : Fetching 'STORE R5, 12(R0)   '
+ID    : SUB R5, R2, R3
+EX    : ADD R2, R1, R4       (R1=10[RF], R4=7[MEM]; result=17)
+MEM   : LOAD R4, 8(R0)
+WB    : NOP
+
+Registers: R0 =0     R1 =10    R2 =0     R3 =7     R4 =0     R5 =0     R6 =0     R7 =0
            R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
-================ Cycle 6 ================ Pc : 6
-IF    : Fetching 'load R5, 8(R0)'
-ID    : mov R4, 5
-EX    : store R3, 8(R0)      (data R3=30[MEM], base R0=100[RF], offset=8; addr=38)
-MEM   : add R3, R1, R2
-WB    : mov R2, 20           (write R2=20)
+================ Cycle 9 ================ Pc : 8
+IF    : Fetching 'MOV R6, 5          '
+ID    : STORE R5, 12(R0)
+EX    : SUB R5, R2, R3       (R2=17[MEM], R3=7[RF]; result=10)
+MEM   : ADD R2, R1, R4
+WB    : LOAD R4, 8(R0)       (write R4=7)
 
-Registers: R0 =100   R1 =10    R2 =20    R3 =0     R4 =0     R5 =0     R6 =0     R7 =0
-           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
-
-[MEM] STORE: Memory[38] = 30 (from R3)
-
-================ Cycle 7 ================ Pc : 7
-IF    : Fetching 'sub R6, R5, R4'
-ID    : load R5, 8(R0)
-EX    : mov R4, 5            (imm=5 and result=5)
-MEM   : store R3, 8(R0)
-WB    : add R3, R1, R2       (write R3=30)
-
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =0     R5 =0     R6 =0     R7 =0
-           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
-
-
-================ Cycle 8 ================ Pc : 8
-IF    : Fetching 'mul R7, R5, R4'
-ID    : sub R6, R5, R4
-EX    : load R5, 8(R0)       (base R0=100[RF], offset=8; addr=108)
-MEM   : mov R4, 5
-WB    : store R3, 8(R0)
-
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =0     R5 =0     R6 =0     R7 =0
-           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
-
-[MEM] LOAD: R5 = 0 (from Memory[108])
-
-================ Cycle 9 ================ Pc : 9
-IF    : Done
-ID    : mul R7, R5, R4
-EX    : sub R6, R5, R4       (R5=0[RF], R4=5[WB]; result=-5)
-MEM   : load R5, 8(R0)
-WB    : mov R4, 5            (write R4=5)
-
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =5     R5 =0     R6 =0     R7 =0
+Registers: R0 =0     R1 =10    R2 =0     R3 =7     R4 =7     R5 =0     R6 =0     R7 =0
            R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
 ================ Cycle 10 ================ Pc : 9
-IF    : Done
-ID    : NOP
-EX    : mul R7, R5, R4       (R5=108[WB], R4=5[RF]; result=540)
-MEM   : sub R6, R5, R4
-WB    : load R5, 8(R0)       (write R5=108)
+IF    : Fetching 'MUL R7, R5, R6    '
+ID    : MOV R6, 5
+EX    : STORE R5, 12(R0)     (data R5=10[MEM], base R0=0[RF], offset=12; addr=12)
+MEM   : SUB R5, R2, R3
+WB    : ADD R2, R1, R4       (write R2=17)
 
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =5     R5 =108   R6 =0     R7 =0
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =0     R6 =0     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+[MEM] STORE: R5(10) -> Memory[3] (byte addr=12)
+
+================ Cycle 11 ================ Pc : 10
+IF    : Fetching 'STORE R7, 16(R0)  '
+ID    : MUL R7, R5, R6
+EX    : MOV R6, 5            (imm=5 and result=5)
+MEM   : STORE R5, 12(R0)
+WB    : SUB R5, R2, R3       (write R5=10)
+
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =0     R7 =0
            R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
-================ Cycle 11 ================ Pc : 9
+================ Cycle 12 ================ Pc : 11
+IF    : Fetching 'LOAD R8, 16(R0)'
+ID    : STORE R7, 16(R0)
+EX    : MUL R7, R5, R6       (R5=10[RF], R6=5[MEM]; result=50)
+MEM   : MOV R6, 5
+WB    : STORE R5, 12(R0)
+
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =0     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+
+================ Cycle 13 ================ Pc : 12
+IF    : Done
+ID    : LOAD R8, 16(R0)      (Stalled - STORE -> LOAD hazard (same address))
+EX    : STORE R7, 16(R0)     (data R7=50[MEM], base R0=0[RF], offset=16; addr=16)
+MEM   : MUL R7, R5, R6
+WB    : MOV R6, 5            (write R6=5)
+
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =0
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0     
+
+[MEM] STORE: R7(50) -> Memory[4] (byte addr=16)
+
+================ Cycle 14 ================ Pc : 12
+IF    : Done
+ID    : LOAD R8, 16(R0)
+EX    : NOP
+MEM   : STORE R7, 16(R0)
+WB    : MUL R7, R5, R6       (write R7=50)
+
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =50
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+
+================ Cycle 15 ================ Pc : 12
+IF    : Done
+ID    : NOP
+EX    : LOAD R8, 16(R0)      (base R0=0[RF], offset=16; addr=16)
+MEM   : NOP
+WB    : STORE R7, 16(R0)
+
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =50
+           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+
+[MEM] LOAD: Memory[4] (byte addr=16) -> value=50 (dest R8)
+
+================ Cycle 16 ================ Pc : 12
 IF    : Done
 ID    : NOP
 EX    : NOP
-MEM   : mul R7, R5, R4
-WB    : sub R6, R5, R4       (write R6=-5)
+MEM   : LOAD R8, 16(R0)
+WB    : NOP
 
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =5     R5 =108   R6 =-5    R7 =0
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =50
            R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
-================ Cycle 12 ================ Pc : 9
+================ Cycle 17 ================ Pc : 12
 IF    : Done
 ID    : NOP
 EX    : NOP
 MEM   : NOP
-WB    : mul R7, R5, R4       (write R7=540)
+WB    : LOAD R8, 16(R0)      (write R8=50)
 
-Registers: R0 =100   R1 =10    R2 =20    R3 =30    R4 =5     R5 =108   R6 =-5    R7 =540
-           R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+Registers: R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =50
+           R8 =50    R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
 
 =============== FINAL REGISTER STATE ===============
-R0 =100   R1 =10    R2 =20    R3 =30    R4 =5     R5 =108   R6 =-5    R7 =540
-R8 =0     R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
+R0 =0     R1 =10    R2 =17    R3 =7     R4 =7     R5 =10    R6 =5     R7 =50
+R8 =50    R9 =0     R10=0     R11=0     R12=0     R13=0     R14=0     R15=0
 
-Total cycles: 12
+Total cycles: 17
