@@ -360,15 +360,14 @@ Resolved resolve_operand(const CPU* cpu, int reg) {
     Resolved r; r.value = 0; r.src = SRC_NONE;
     if (reg == -1) return r;
 
-    // If EX/MEM has an instruction that wrote this reg and it is not a LOAD
+    // If EX/MEM has an instruction that wrote this reg, forward its alu_result.
+    // (We will ensure cpu->pipeline_EX_MEM contains the post-MEM value before EX runs.)
     if (cpu->pipeline_EX_MEM.inst.valid && cpu->pipeline_EX_MEM.inst.rd == reg && cpu->pipeline_EX_MEM.inst.rd != REG_UNUSED) {
-        // Only forward from EX/MEM when the producing instruction is NOT a LOAD.
-        if (cpu->pipeline_EX_MEM.inst.op != OP_LOAD) {
-            r.value = cpu->pipeline_EX_MEM.alu_result;
-            r.src = SRC_MEM;
-            return r;
-        }
+        r.value = cpu->pipeline_EX_MEM.alu_result;
+        r.src = SRC_MEM;
+        return r;
     }
+
     // Then check MEM/WB (final result available for writes and loads)
     if (cpu->pipeline_MEM_WB.inst.valid && cpu->pipeline_MEM_WB.inst.rd == reg && cpu->pipeline_MEM_WB.inst.rd != REG_UNUSED) {
         r.value = cpu->pipeline_MEM_WB.alu_result;
@@ -432,6 +431,7 @@ typedef struct {
  * @param pipeline_ID_EX Current ID/EX latch
  * @return ExecResult (EX/MEM latch + ALU result + branch info)
  */
+// ---------- EX (pure) ----------
 ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
     ExecResult r;
     r.next = pipeline_ID_EX;
@@ -460,11 +460,28 @@ ExecResult execute_stage(const CPU* cpu, StageLatch pipeline_ID_EX) {
     r.next.src_rs1 = rs1.src;
     r.next.src_rs2 = rs2.src;
 
-    // Use modular ALU: for LOAD/STORE, compute effective byte address in EX stage.
-    r.next.alu_result = alu_execute(pipeline_ID_EX.inst.op, rs1.value, rs2.value, pipeline_ID_EX.inst.imm);
+    // --- FIX: ensure address computation uses the base register ---
+    // For LOAD: parse_load set rs1 = base
+    // For STORE: parse_store set rs2 = base and rs1 = data
+    int base_val = 0;
+    int other_val = 0;
+    if (pipeline_ID_EX.inst.op == OP_STORE) {
+        // For STORE: base is rs2, data is rs1
+        base_val = rs2.value;        // base register for address
+        other_val = rs1.value;       // data to store
+        // Keep val_rs1 as store-data (already set above from rs1)
+    } else if (pipeline_ID_EX.inst.op == OP_LOAD) {
+        // For LOAD: base is rs1
+        base_val = rs1.value;
+        other_val = 0;
+    } else {
+        // For ALU ops: use rs1 and rs2 in normal order
+        base_val = rs1.value;
+        other_val = rs2.value;
+    }
 
-    // For STORE, also ensure r.next.val_rs1 carries the store data (rs1 was used as data register)
-    // In our parse, for STORE we used rs1 as source-data and rs2 as base; so val_rs1 already has data.
+    r.next.alu_result = alu_execute(pipeline_ID_EX.inst.op, base_val, other_val, pipeline_ID_EX.inst.imm);
+
     return r;
 }
 
@@ -477,6 +494,12 @@ typedef struct {
  * @brief Memory stage (pass-through for this ISA)
  * @param pipeline_EX_MEM Current EX/MEM latch
  * @return MemResult (MEM/WB latch)
+ *
+ * Key fixes:
+ *  - For LOAD: do NOT write to register file here. Instead set next.alu_result = loaded_data
+ *    so the WB stage writes the register (and forwarding from MEM/WB will expose loaded data).
+ *  - For STORE: perform the memory write here (MEM stage) using val_rs1, and check bounds.
+ *  - Add bounds checks for memory accesses.
  */
 MemResult memory_stage(CPU* cpu, StageLatch pipeline_EX_MEM) {
     MemResult r;
@@ -486,29 +509,42 @@ MemResult memory_stage(CPU* cpu, StageLatch pipeline_EX_MEM) {
         return r;
     }
 
-if (pipeline_EX_MEM.inst.op == OP_STORE) {
-    int effective_address = pipeline_EX_MEM.alu_result; // already computed in EX stage
-    int source_register = pipeline_EX_MEM.inst.rs1;
-    cpu->memory[effective_address / 4] = pipeline_EX_MEM.val_rs1; // word-addressed memory
-    printf("[MEM] STORE: R%d(%d) -> Memory[%d]\n",
-           source_register,
-           pipeline_EX_MEM.val_rs1,
-           effective_address);
-}
-else if (pipeline_EX_MEM.inst.op == OP_LOAD) {
-    int effective_address = pipeline_EX_MEM.alu_result; // already computed in EX stage
-    int dest_register = pipeline_EX_MEM.inst.rd;
-    cpu->R[dest_register] = cpu->memory[effective_address / 4]; // word-addressed memory
-    printf("[MEM] LOAD: R%d <- Memory[%d] (value=%d)\n",
-           dest_register,
-           effective_address,
-           cpu->R[dest_register]);
-}
+    // Compute effective byte address (already computed in EX as alu_result)
+    int effective_address = pipeline_EX_MEM.alu_result;
+    // Convert to word index safely
+    if (effective_address < 0 || (effective_address / WORD_SIZE_BYTES) >= MEM_SIZE_WORDS) {
+        fprintf(stderr, "[MEM] Address out of range: %d (inst: %s)\n",
+                effective_address, pipeline_EX_MEM.inst.text);
+        // keep pipeline state but do not perform memory access
+        return r;
+    }
+    int word_index = effective_address / WORD_SIZE_BYTES;
 
-
-
- else {
-        // For ALU ops / MOV, pass through the ALU result (already in alu_result)
+    if (pipeline_EX_MEM.inst.op == OP_STORE) {
+        // STORE: write the data to memory now (MEM stage)
+        int data_to_store = pipeline_EX_MEM.val_rs1;
+        cpu->memory[word_index] = data_to_store;
+        // Keep alu_result as is or set it to data for consistency (not used for store destination)
+        r.next.alu_result = pipeline_EX_MEM.alu_result;
+        printf("[MEM] STORE: R%d(%d) -> Memory[%d] (byte addr=%d)\n",
+               pipeline_EX_MEM.inst.rs1,
+               data_to_store,
+               word_index,
+               effective_address);
+    }
+    else if (pipeline_EX_MEM.inst.op == OP_LOAD) {
+        // LOAD: read from memory, but DO NOT write to register file here.
+        // Instead, place the loaded data into alu_result so WB writes it and MEM/WB forwarding works.
+        int loaded = cpu->memory[word_index];
+        r.next.alu_result = loaded; // this value will be written to R[rd] by WB stage.
+        printf("[MEM] LOAD: Memory[%d] (byte addr=%d) -> value=%d (dest R%d)\n",
+               word_index,
+               effective_address,
+               loaded,
+               pipeline_EX_MEM.inst.rd);
+    }
+    else {
+        // ALU or MOV: pass through the ALU result for WB stage
         r.next.alu_result = pipeline_EX_MEM.alu_result;
     }
 
@@ -700,13 +736,25 @@ int main() {
 
     while (cpu.PC < cpu.inst_count || !pipeline_is_empty(&cpu)) {
         // ---- Phase 1: compute ----
-        wb_stage(&cpu);
-        MemResult mem_res = memory_stage(&cpu, cpu.pipeline_EX_MEM);
-        ExecResult ex_res = execute_stage(&cpu, cpu.pipeline_ID_EX);
+           // ---- Phase 1: compute ----
+    wb_stage(&cpu);
 
-        DecodeResult dec_res = decode_stage(&cpu, cpu.pipeline_IF_ID, cpu.pipeline_ID_EX);
-        Instruction fetched_inst;
-        fetch_stage(&cpu, &fetched_inst);
+    // Run MEM stage for the instruction currently in EX/MEM and capture its outputs.
+    MemResult mem_res = memory_stage(&cpu, cpu.pipeline_EX_MEM);
+
+    // Make the MEM stage's output immediately visible for forwarding by
+    // updating the CPU's pipeline_EX_MEM to the post-MEM latch.
+    // This allows resolve_operand(...) to forward load-values from EX/MEM.
+    cpu.pipeline_EX_MEM = mem_res.next;
+
+    // Now run EX stage for the instruction currently in ID/EX. It may now
+    // forward values produced by the MEM stage (including load data).
+    ExecResult ex_res = execute_stage(&cpu, cpu.pipeline_ID_EX);
+
+    DecodeResult dec_res = decode_stage(&cpu, cpu.pipeline_IF_ID, cpu.pipeline_ID_EX);
+    Instruction fetched_inst;
+    fetch_stage(&cpu, &fetched_inst);
+
 
         // ---- Phase 2: print ----
         // Use the execute result just for printing the EX line
