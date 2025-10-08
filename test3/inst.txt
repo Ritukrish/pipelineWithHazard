@@ -1,9 +1,12 @@
-mov R0, 100
-mov R1, 10
-mov R2, 20
-add R3, R1, R2
-store R3, 8(R0)
-mov R4, 5
-load R5, 8(R0)
-sub R6, R5, R4
-mul R7, R5, R4
+MOV R0, 0         
+MOV R1, 10        
+MOV R3, 7         
+STORE R3, 8(R0)   
+LOAD R4, 8(R0)    
+ADD R2, R1, R4    
+SUB R5, R2, R3    
+STORE R5, 12(R0)   
+MOV R6, 5          
+MUL R7, R5, R6    
+STORE R7, 16(R0)  
+LOAD R8, 16(R0)
